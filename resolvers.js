@@ -1,6 +1,8 @@
 import client from '@prisma/client';
-import { ApolloError, AuthenticationError } from 'apollo-server';
+import { ApolloError, AuthenticationError, ForbiddenError } from 'apollo-server';
 import argon from 'argon2';
+import jwt from 'jsonwebtoken';
+
 const prisma=new client.PrismaClient();
 let users=[
     {
@@ -31,11 +33,23 @@ const todos=[
 
 const resolvers={
     Query:{
-        users:()=>users,
-        user:(parent,args,context)=>{
-           
-            return users.find(u=>u.id==args.id);
-        }
+        users:async(_,args,{userId})=>{
+            if(!userId){
+                throw new ForbiddenError('you must be logged in');
+            }
+            const users=await prisma.user.findMany({
+                orderBy:{
+                    createdAt:"desc"
+                },
+                where:{
+                    id:{
+                        not:userId
+                    }
+                }
+            });
+            return users;
+        },
+        
     },
     User:{
         todos:(parent,args,context)=>{
@@ -80,9 +94,14 @@ const resolvers={
             }
             const match =await argon.verify(user.password,userSignin.password);
             if(match){
+              const token=  jwt.sign({
+                    userId:user.id,
+                    email:user.email
+                },
+                
+                process.env.JWT_SECRET,);
                 return {
-                    token:"abc"
-                }
+                    token};
             }
             else{
                 throw new AuthenticationError("password is incorrect");
