@@ -2,34 +2,13 @@ import client from '@prisma/client';
 import { ApolloError, AuthenticationError, ForbiddenError } from 'apollo-server';
 import argon from 'argon2';
 import jwt from 'jsonwebtoken';
+import { PubSub } from 'graphql-subscriptions';
+
+const pubsub = new PubSub();
 
 const prisma=new client.PrismaClient();
-let users=[
-    {
-        id:"1",
-        name:'piash',
-        email:'piash@gmail.com',
-        password:'123658'
-    },
-    {
-        id:"2",
-        name:'polash',
-        email:'polash@gmail.com',
-        password:'12365'
-    },
-]
-const todos=[
-    {
-        id:1,
-        title:"first todo",
-        by:"1"
-    },
-    {
-        id:2,
-        title:"second todo",
-        by:"1"
-    }
-];
+
+const MESSAGE_ADDED='messageAdded';
 
 const resolvers={
     Query:{
@@ -49,6 +28,30 @@ const resolvers={
             });
             return users;
         },
+        messagesByUser:async(_,{receiverId},{userId})=>{
+            if(!userId){
+                throw new ForbiddenError('you must be logged in');
+            }
+            const messages=await prisma.message.findMany({
+                orderBy:{
+                    createdAt:"asc"
+                },
+                where:{
+                    OR:[
+                        {
+                            receiverId,
+                            senderId:userId
+                        },
+                        {
+                            receiverId:userId,
+                            senderId:receiverId
+                        }
+                    ]
+                }
+            });
+            return messages;
+
+        }
         
     },
     User:{
@@ -108,8 +111,30 @@ const resolvers={
             }
             
            
+        },
+        createMessage:async(_,{receiverId,text},{userId})=>{
+            if(!userId){
+                throw new ForbiddenError('you must be logged in');
+            }
+            const createdMessage=await prisma.message.create({
+                data:{
+                    text,
+                    receiverId ,
+                    senderId:userId
+                }
+            });
+            pubsub.publish(MESSAGE_ADDED,{
+                messageAdded:createdMessage
+            });
+            return createdMessage;
+        }
+         
+    },
+    Subscription:{
+        messageAdded:{
+            subscribe:()=>pubsub.asyncIterator(MESSAGE_ADDED)
         }
     }
 }
 
-export default resolvers;
+export default resolvers; 
